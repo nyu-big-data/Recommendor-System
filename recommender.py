@@ -24,8 +24,8 @@ def main(spark, netID):
 
     ratings.createOrReplaceTempView('ratings')
     # Construct a query
-    print('Example 1: Executing SELECT count(*) FROM ratings with SparkSQL')
-    query = spark.sql('SELECT movieID, COUNT(rating) AS counts, (SUM(rating)/COUNT(rating)) AS avg_rating FROM ratings GROUP BY movieID HAVING COUNT(rating) > 0 ORDER BY avg_rating DESC, counts DESC')
+    print('Getting top 100 movies with highest ratings')
+    query = spark.sql('SELECT movieID, COUNT(rating) AS counts, (SUM(rating)/COUNT(rating)) AS avg_rating FROM ratings GROUP BY movieID HAVING COUNT(rating) > 0 ORDER BY avg_rating DESC, counts DESC LIMIT 100')
 
     # # Print the results to the console to delet it 
     query.show()
