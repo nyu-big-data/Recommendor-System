@@ -9,6 +9,7 @@ import getpass
 
 # And pyspark.sql to get the spark session
 from pyspark.sql import SparkSession
+from pyspark.mllib.evaluation import RegressionMetrics
 
 
 def main(spark, netID):
@@ -20,22 +21,30 @@ def main(spark, netID):
     '''
 
     ratings = spark.read.csv('ratings.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER')
+    # ratings = spark.read.csv('ratings-small.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER')
     ratings.printSchema()
 
     ratings.createOrReplaceTempView('ratings')
     # Construct a query
     print('Getting top 100 movies with highest ratings')
-    query = spark.sql('SELECT movieID, COUNT(rating) AS counts, (SUM(rating)/COUNT(rating)) AS avg_rating FROM ratings GROUP BY movieID HAVING COUNT(rating) > 0 ORDER BY avg_rating DESC, counts DESC LIMIT 100')
+    predicted_ratings = spark.sql('SELECT movieId, (SUM(rating)/COUNT(rating)) AS predicted_rating FROM ratings GROUP BY movieId HAVING COUNT(rating) > 0 ORDER BY predicted_rating DESC LIMIT 100')
 
-    # # Print the results to the console to delet it 
-    query.show()
+    # Print the predicted ratings to the console
+    predicted_ratings.show()
+    predicted_ratings.createOrReplaceTempView('predicted_ratings')
 
-    # delet dis now
-    #####--------------YOUR CODE STARTS HERE--------------#####
+    #ratings here will be subbed by the test df
+    scoreAndLabels = spark.sql('SELECT rating, predicted_rating FROM predicted_ratings LEFT JOIN ratings ON predicted_ratings.movieId = ratings.movieId')
+    scoreAndLabels.show()
 
-    #make sure to load reserves.json, artist_term.csv, and tracks.csv
-    #For the CSVs, make sure to specify a schema and delet it!
+    # Instantiate regression metrics to compare predicted and actual ratings
+    metrics = RegressionMetrics(scoreAndLabels.rdd)
 
+    # Root mean squared error
+    print("RMSE = %s" % metrics.rootMeanSquaredError)
+
+    # R-squared
+    print("R-squared = %s" % metrics.r2)
 
 # Only enter this block if we're in main
 if __name__ == "__main__":
