@@ -8,9 +8,10 @@ Usage:
 import getpass
 
 # And pyspark.sql to get the spark session
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Row
 from pyspark.mllib.evaluation import RegressionMetrics
-
+from pyspark.ml.evaluation import RegressionEvaluator
+from pyspark.ml.recommendation import ALS
 
 def main(spark, netID):
     '''Main routine for Lab Solutions
@@ -20,11 +21,13 @@ def main(spark, netID):
     netID : string, netID of student to find files in HDFS
     '''
 
-    ratings = spark.read.csv('ratings.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER')
-    # ratings = spark.read.csv('ratings-small.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER')
+    ratings = spark.read.csv('ratings.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
+    # ratings = spark.read.csv('ratings-small.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
     ratings.printSchema()
+    ratings.show()
 
     ratings.createOrReplaceTempView('ratings')
+
     # Construct a query
     print('Getting top 100 movies with highest ratings')
     predicted_ratings = spark.sql('SELECT movieId, (SUM(rating)/COUNT(rating)) AS predicted_rating FROM ratings GROUP BY movieId HAVING COUNT(rating) > 0 ORDER BY predicted_rating DESC LIMIT 100')
@@ -40,11 +43,32 @@ def main(spark, netID):
     # Instantiate regression metrics to compare predicted and actual ratings
     metrics = RegressionMetrics(scoreAndLabels.rdd)
 
+    print("With popularity baseline model: ")
+
     # Root mean squared error
     print("RMSE = %s" % metrics.rootMeanSquaredError)
 
     # R-squared
     print("R-squared = %s" % metrics.r2)
+
+    print("---------------------------------------------------")
+
+    print("with ALS model: ")
+
+    # we will sub the training and test dataset with the one we partitioned
+    (training, test) = ratings.randomSplit([0.8, 0.2]) 
+
+    als = ALS(maxIter=5, regParam=0.01, userCol="userId", itemCol="movieId", ratingCol="rating",
+          coldStartStrategy="drop")
+    model = als.fit(training)
+
+    # Evaluate the model by computing the RMSE on the test data
+    predictions = model.transform(test)
+    evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating",
+                                    predictionCol="prediction")
+    rmse = evaluator.evaluate(predictions)
+    print("Root-mean-square error = " + str(rmse))
+
 
 # Only enter this block if we're in main
 if __name__ == "__main__":
