@@ -8,10 +8,10 @@ Usage:
 import getpass
 
 # And pyspark.sql to get the spark session
-from pyspark.sql import SparkSession, Row
+from pyspark.sql import SparkSession
 from pyspark.mllib.evaluation import RegressionMetrics
-from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.recommendation import ALS
+from pyspark.sql.functions import explode, col
 
 def main(spark, netID):
     '''Main routine for Lab Solutions
@@ -25,7 +25,6 @@ def main(spark, netID):
     # ratings = spark.read.csv('ratings-small.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
     ratings.printSchema()
     ratings.show()
-
     ratings.createOrReplaceTempView('ratings')
 
     # Construct a query
@@ -36,8 +35,13 @@ def main(spark, netID):
     predicted_ratings.show()
     predicted_ratings.createOrReplaceTempView('predicted_ratings')
 
-    #ratings here will be subbed by the test df
-    scoreAndLabels = spark.sql('SELECT rating, predicted_rating FROM predicted_ratings LEFT JOIN ratings ON predicted_ratings.movieId = ratings.movieId')
+    # test = spark.read.csv('test-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
+    test = spark.read.csv('test-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
+    
+    test.createOrReplaceTempView('test')
+
+    # joining 2 tables and leaving only the ratings from each table to be compared
+    scoreAndLabels = spark.sql('SELECT rating, predicted_rating FROM predicted_ratings LEFT JOIN test ON predicted_ratings.movieId = test.movieId').na.drop()
     scoreAndLabels.show()
 
     # Instantiate regression metrics to compare predicted and actual ratings
@@ -56,18 +60,40 @@ def main(spark, netID):
     print("with ALS model: ")
 
     # we will sub the training and test dataset with the one we partitioned
-    (training, test) = ratings.randomSplit([0.8, 0.2]) 
+    # training = spark.read.csv('train-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
+    training = spark.read.csv('train-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating DOUBLE, timestamp INTEGER').na.drop()
+    
+    training.createOrReplaceTempView('training')
+    training.show()
+    test.show()
 
-    als = ALS(maxIter=5, regParam=0.01, userCol="userId", itemCol="movieId", ratingCol="rating",
-          coldStartStrategy="drop")
+    # training
+    als = ALS(maxIter=20, regParam=0.01, userCol="userId", itemCol="movieId", ratingCol="rating", coldStartStrategy="drop")
     model = als.fit(training)
 
     # Evaluate the model by computing the RMSE on the test data
-    predictions = model.transform(test)
-    evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating",
-                                    predictionCol="prediction")
-    rmse = evaluator.evaluate(predictions)
-    print("Root-mean-square error = " + str(rmse))
+    users = test.select(als.getUserCol()).distinct()
+    predictions = model.recommendForUserSubset(users, 100)
+    predictions = predictions.withColumn("recommendations", explode(col("recommendations"))).select("userId", "recommendations.movieId", "recommendations.rating")
+    predictions.printSchema()
+    predictions = predictions.rdd.map(lambda r: ((r.userId, r.movieId), r.rating)).toDF(["user_movie", "predictions_rating"])
+    predictions.show()
+
+    ratingsTuple = test.rdd.map(lambda r: ((r[0], r[1]), r[2])).toDF(["user_movie", "rating"])
+    ratingsTuple.show()
+    ratingsTuple.createOrReplaceTempView('ratingsTuple')
+    predictions.createOrReplaceTempView('predictions')
+    scoreAndLabels_als = spark.sql('SELECT rating, predictions_rating FROM predictions LEFT JOIN ratingsTuple ON ratingsTuple.user_movie = predictions.user_movie').na.drop()
+
+    # Instantiate regression metrics to compare predicted and actual ratings
+    metrics_als = RegressionMetrics(scoreAndLabels_als.rdd)
+
+    # Root mean squared error
+    print("RMSE = %s" % metrics_als.rootMeanSquaredError)
+
+    # R-squared
+    print("R-squared = %s" % metrics_als.r2)
+
 
 
 # Only enter this block if we're in main
