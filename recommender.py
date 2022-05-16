@@ -39,6 +39,7 @@ def main(spark, netID):
     # reading test data from the partitioned file
     test = spark.read.csv('test-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
     # test = spark.read.csv('test-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    test = test.drop("timestamp")
     test.createOrReplaceTempView('test')
 
     # joining 2 tables and leaving only the ratings from each table to be compared
