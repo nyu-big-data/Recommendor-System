@@ -28,9 +28,21 @@ def main(spark, netID):
 
     ratings.createOrReplaceTempView('ratings')
 
+    # reading from the partitioned training dataset
+    training = spark.read.csv('train-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    # training = spark.read.csv('train-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    training = training.drop("timestamp")
+    training.createOrReplaceTempView('training')
+
     # Construct a query to get the top 100 movies with highest ratings
     print('Getting top 100 movies with highest ratings')
+
+    start_time = time.time()
+
     predicted_ratings = spark.sql('SELECT movieId, (SUM(rating)/COUNT(rating)) AS predicted_rating FROM ratings GROUP BY movieId HAVING COUNT(rating) > 0 ORDER BY predicted_rating DESC LIMIT 100')
+    
+    end_time = time.time()
+    print("Total popularity baseline model query execution time: {} seconds".format(end_time - start_time))
 
     # Print the predicted ratings to the console
     predicted_ratings.show()
@@ -60,12 +72,6 @@ def main(spark, netID):
     print("---------------------------------------------------")
 
     print("with ALS model: ")
-
-    # reading from the partitioned training dataset
-    training = spark.read.csv('train-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
-    # training = spark.read.csv('train-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
-    training = training.drop("timestamp")
-    training.createOrReplaceTempView('training')
 
     # training
     start_time = time.time()
