@@ -9,6 +9,7 @@ from pyspark.sql.functions import col
 from pyspark.sql.functions import countDistinct
 from functools import reduce
 from pyspark.sql import DataFrame
+from pyspark.sql.functions import percent_rank
 
 
 def main(spark, netID):
@@ -31,29 +32,47 @@ def main(spark, netID):
     #Counting the number of distinct users 
     count_of_user = ratings.select('userId').distinct().count()
 
+    print(count_of_user)
+
     #Dividing the users in three dataframes 
     temp = ratings.filter((col('userId') <= (2*count_of_user/3)) & (col('userId') >= (count_of_user/3)))
     temp_df = ratings.filter(col('userId') > (2*count_of_user/3))
     temp_df2 = ratings.filter(col('userId') < (count_of_user/3)) 
 
+    temp.show(10)
+
+    temp_df.show(10)
+
+    temp_df2.show(10)
+
     #Counting the entries each user has 
-    count_user_history = temp_df.select('userId').groupby('userId').count()
-    count_user_history.printSchema()
-    count_user_history.createOrReplaceTempView('count_user_history')
-    count_user_history.show(10)
+    # count_user_history = temp_df.select('userId').groupby('userId').count()
+    # count_user_history.printSchema()
+    # count_user_history.createOrReplaceTempView('count_user_history')
+    # count_user_history.show(10)
     
+    # print(count_user_history['count'])
+
     #Using the window function to partition each user into train and test     
     window_1 = Window.partitionBy(temp_df['userId']).orderBy('timestamp')
-    train_1 = temp_df.select('*', F.rank().over(window_1).alias('rank')).filter(F.col('rank') > count_user_history['userId'] * 0.8).drop('rank')
-    test = temp_df.select('*', F.rank().over(window_1).alias('rank')).filter(F.col('rank') <= count_user_history['userId'] * 0.8).drop('rank')
+    train_1 = temp_df.select('*', percent_rank().over(window_1).alias('rank')).filter(F.col('rank') <= .8).drop('rank')
+    test = temp_df.select('*', percent_rank().over(window_1).alias('rank')).filter(F.col('rank') > .8).drop('rank')
 
-    # train_1.show(10)
+    train_1.show(10)
+
+    test.show(10)
 
     count_user_history2 = temp_df2.select('userId').groupby('userId').count()
     #Using the window function to partition each user into train and valid
     window_2 = Window.partitionBy(temp_df2['userId']).orderBy('timestamp')
-    train_2 = temp_df2.select('*', F.rank().over(window_2).alias('rank')).filter(F.col('rank') > count_user_history2['userId']* 0.8).drop('rank')
-    valid = temp_df2.select('*', F.rank().over(window_2).alias('rank')).filter(F.col('rank') <= count_user_history2['userId'] * 0.8).drop('rank')
+    train_2 = temp_df2.select('*', percent_rank().over(window_2).alias('rank')).filter(F.col('rank')  <= .8).drop('rank')
+    valid = temp_df2.select('*', percent_rank().over(window_2).alias('rank')).filter(F.col('rank') > .8).drop('rank')
+
+
+    train_2.show(10)
+
+    valid.show(10)
+
 
     dfs = [train_1, train_2, temp]
 
@@ -64,9 +83,9 @@ def main(spark, netID):
     valid = valid.orderBy('userId')
 
     #Saving to csv 
-    train .coalesce(1).write.csv('hdfs:/user/{}/all/trainlarge.csv'.format(netID))
-    valid.coalesce(1).write.csv('hdfs:/user/{}/all/validlarge.csv'.format(netID))
-    test.coalesce(1).write.csv('hdfs:/user/{}/all/testlarge.csv'.format(netID))
+    train .coalesce(1).write.csv('hdfs:/user/{}/all/trainlarge'.format(netID))
+    valid.coalesce(1).write.csv('hdfs:/user/{}/all/validlarge'.format(netID))
+    test.coalesce(1).write.csv('hdfs:/user/{}/all/testlarge'.format(netID))
 
 # Only enter this block if we're in main
 if __name__ == "__main__":
