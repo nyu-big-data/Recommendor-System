@@ -10,8 +10,8 @@ import getpass
 import time
 
 # And pyspark.sql to get the spark session
-from pyspark.sql import SparkSession
-from pyspark.mllib.evaluation import RegressionMetrics
+from pyspark.sql import SparkSession, Window, functions as F
+from pyspark.mllib.evaluation import RegressionMetrics, RankingMetrics
 from pyspark.ml.recommendation import ALS
 from pyspark.sql.functions import explode, col
 
@@ -24,8 +24,8 @@ def main(spark, netID):
     '''
 
     # reading from the partitioned training dataset
-    training = spark.read.csv('trainsmall.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
-    # training = spark.read.csv('trainlarge.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    # training = spark.read.csv('trainsmall.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    training = spark.read.csv('all/trainlarge/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
     training = training.drop("timestamp")
     training.createOrReplaceTempView('training')
 
@@ -43,25 +43,36 @@ def main(spark, netID):
     predicted_ratings.createOrReplaceTempView('predicted_ratings')
 
     # reading test data from the partitioned file
-    test = spark.read.csv('testsmall.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
-    # test = spark.read.csv('testlarge.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    # test = spark.read.csv('testsmall.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    test = spark.read.csv('all/testlarge/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
     test = test.drop("timestamp")
     test.createOrReplaceTempView('test')
+
+     # Getting at most 100 highest rated movie list of each user in the test dataset	
+    test_ranking = test.withColumn("rn", F.row_number().over(Window.partitionBy("userId").orderBy(F.col("rating").desc()))).filter(f"rn <= {100}").groupBy("userId").agg(F.collect_list(F.col("movieId")).alias("movie_list"))	
+    test_ranking.createOrReplaceTempView('test_ranking')	
+
+    top_100_movies = predicted_ratings.agg(F.collect_list(F.col("movieId")).alias("predicted_movie_list"))	
+    test.createOrReplaceTempView('top_100_movies')	
+    
+    predicted_ratings_ranking = test_ranking.select("movie_list").crossJoin(top_100_movies.select("predicted_movie_list"))	
+    
 
     # joining 2 tables and leaving only the ratings from each table to be compared
     scoreAndLabels = spark.sql('SELECT rating, predicted_rating FROM predicted_ratings INNER JOIN test ON predicted_ratings.movieId = test.movieId').na.drop()
 
+    print("With popularity baseline model: ")	
 
-    # Instantiate regression metrics to compare predicted and actual ratings
-    metrics = RegressionMetrics(scoreAndLabels.rdd)
+    # Instantiate ranking metrics to compare predicted and actual ratings
+    ranking_metrics = RankingMetrics(predicted_ratings_ranking.rdd)	
+    print("popularity baseline Mean average precision at 100 = %s" % ranking_metrics.meanAveragePrecisionAt(100))	
+    print("popularity baseline NDCG at 100 = %s" % ranking_metrics.ndcgAt(100))	
 
-    print("With popularity baseline model: ")
+    # Instantiate regression metrics to compare predicted and actual ratings	
+    regression_metrics = RegressionMetrics(scoreAndLabels.rdd)	
 
-    # Root mean squared error
-    print("Popularity baseline model RMSE = %s" % metrics.rootMeanSquaredError)
-
-    # R-squared
-    print("popularity baseline model R-squared = %s" % metrics.r2)
+    # Root mean squared error	
+    print("Popularity baseline model RMSE = %s" % regression_metrics.rootMeanSquaredError)
 
     print("---------------------------------------------------")
 
@@ -78,8 +89,8 @@ def main(spark, netID):
 
 
     # Tune the hyperparameters with the validation data set
-    validation = spark.read.csv('valid-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
-    # validation = spark.read.csv('valid-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    # validation = spark.read.csv('valid-small-2.csv/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
+    validation = spark.read.csv('all/validlarge/*.csv', schema='userId INTEGER, movieId INTEGER, rating FLOAT, timestamp INTEGER').na.drop()
     validation = validation.drop("timestamp")
     validation.createOrReplaceTempView('validation')
 
